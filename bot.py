@@ -857,54 +857,28 @@ async def call_deepseek(d: dict, on_progress) -> str:
 
         error["exc"] = last_exc
         done["flag"] = True
+        
+async def ticker():
+    stage_idx = 0
+    elapsed   = 0
 
-    async def ticker():
-        stage_idx = 0
-        elapsed   = 0
-        _stages   = get_stages(d.get("ui_lang", "tk"))
+    while not done["flag"]:
+        await asyncio.sleep(6)
+        elapsed += 6
 
-        while not done["flag"]:
-            await asyncio.sleep(6)
-            elapsed += 6
+        if stage_idx < len(STAGES):
+            pct, status = STAGES[stage_idx]
+            stage_idx += 1
+        else:
+            pct    = 97
+            mins   = elapsed // 60
+            secs_e = elapsed % 60
+            status = f"⏳ Taýarlanýar... {mins}:{secs_e:02d}"
 
-            if stage_idx < len(_stages):
-                pct, status = _stages[stage_idx]
-                stage_idx += 1
-            else:
-                pct    = 97
-                mins   = elapsed // 60
-                secs_e = elapsed % 60
-                _wait_lbl = {
-                    "tk": f"⏳ Taýarlanýar... {mins}:{secs_e:02d}",
-                    "ru": f"⏳ Создаётся... {mins}:{secs_e:02d}",
-                    "en": f"⏳ Creating... {mins}:{secs_e:02d}",
-                }.get(d.get("ui_lang", "tk"), "⏳")
-                status = _wait_lbl
-
-            try:
-                await on_progress(pct, status)
-            except Exception:
-                pass
-
-    done["flag"] = False
-    ft = asyncio.create_task(fetch())
-    tt = asyncio.create_task(ticker())
-
-    try:
-        await ft
-    finally:
-        done["flag"] = True
-        tt.cancel()
         try:
-            await tt
-        except asyncio.CancelledError:
+            await on_progress(pct, status)
+        except Exception:
             pass
-
-    if "exc" in error:
-        raise error["exc"]
-
-    await on_progress(100, "✅ Taýar!")
-    return result["text"]
 
     async def fetch():
         max_retries = 5

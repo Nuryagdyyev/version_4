@@ -694,7 +694,7 @@ STAGES = [
 ]
 
 async def call_deepseek(d: dict, on_progress) -> str:
-    prompt  = build_prompt(d)
+    prompt = build_prompt(d)
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type":  "application/json",
@@ -702,7 +702,6 @@ async def call_deepseek(d: dict, on_progress) -> str:
         "Accept": "application/json",
     }
 
-    # Req items (talap tekstleri)
     req_items = d.get("req_items", [])
     extra_texts = []
     for item in req_items:
@@ -716,39 +715,24 @@ async def call_deepseek(d: dict, on_progress) -> str:
     else:
         user_content_final = prompt
 
-    _doc_lang = d.get("doc_lang", "ru")
     secs = int(d.get("sections", 2))
 
-    if _doc_lang == "en":
-        system_prompt = (
-            "You are a professional academic author. "
-            "Write ONLY in the English language. "
-            "You MUST use EXACTLY these markers on separate lines:\n"
-            "##ВВЕДЕНИЕ##\n"
-            + "".join(f"##ГЛАВА_{i}##\n" for i in range(1, secs + 1))
-            + "##ЗАКЛЮЧЕНИЕ##\n"
-            "##СПИСОК_ЛИТЕРАТУРЫ##\n"
-            "Write markers EXACTLY as shown — no spaces, no bold, no changes. "
-            "If there is a special requirements section — follow them completely. "
-            "Number all lists: 1. 2. 3. — no bullet points."
-        )
-    else:
-        system_prompt = (
-            "Ты профессиональный академический автор. "
-            "Пиши ТОЛЬКО на русском языке. "
-            "СТРОГО ОБЯЗАТЕЛЬНО: используй ИМЕННО ЭТИ маркеры на отдельной строке:\n"
-            "##ВВЕДЕНИЕ##\n"
-            + "".join(f"##ГЛАВА_{i}##\n" for i in range(1, secs + 1))
-            + "##ЗАКЛЮЧЕНИЕ##\n"
-            "##СПИСОК_ЛИТЕРАТУРЫ##\n"
-            "Маркеры писать ТОЧНО так — без пробелов, без звёздочек, без изменений. "
-            "Все перечисления: 1. 2. 3. — без маркеров. "
-            "НЕ используй markdown форматирование."
-        )
+    system_prompt = (
+        "Ты профессиональный академический автор. "
+        "Пиши ТОЛЬКО на русском языке. "
+        "СТРОГО ОБЯЗАТЕЛЬНО: используй ИМЕННО ЭТИ маркеры на отдельной строке:\n"
+        "##ВВЕДЕНИЕ##\n"
+        + "".join(f"##ГЛАВА_{i}##\n" for i in range(1, secs + 1))
+        + "##ЗАКЛЮЧЕНИЕ##\n"
+        "##СПИСОК_ЛИТЕРАТУРЫ##\n"
+        "Маркеры писать ТОЧНО так — без пробелов, без звёздочек, без изменений. "
+        "Все перечисления: 1. 2. 3. — без маркеров. "
+        "НЕ используй markdown форматирование."
+    )
 
     _max_tok = d.get("_max_tokens_calc", 8000)
     body = {
-        "model":       DEEPSEEK_MODEL,
+        "model":      DEEPSEEK_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_content_final},
@@ -786,143 +770,68 @@ async def call_deepseek(d: dict, on_progress) -> str:
 
                     raw = text.strip()
 
-                    # ── LOG: hakyky gelýän teksti gör ──
                     log.info(f"=== DEEPSEEK RAW (ilkinji 800 simwol) ===\n{raw[:800]}\n==================")
 
-                    # ── Markerleri normalize et ──
-                    import re as _re
-
-                    # ** bold ** aýyr
-                    raw = _re.sub(r'\*+', '', raw)
-
-                    # ## ВВЕДЕНИЕ ## → ##ВВЕДЕНИЕ##  (boşluklar bilen)
-                    raw = _re.sub(
-                        r'##\s*([А-ЯЁA-Z_\d]+)\s*##',
-                        r'##\1##',
-                        raw
-                    )
-
-                    # Глава_1 / Глава 1 / глава_1 hemmesi → ##ГЛАВА_1##
-                    raw = _re.sub(
+                    # Markerleri normalize et
+                    raw = re.sub(r'\*+', '', raw)
+                    raw = re.sub(r'##\s*([А-ЯЁA-Z_\d]+)\s*##', r'##\1##', raw)
+                    raw = re.sub(
                         r'##\s*[Гг][Лл][Аа][Вв][Аа]\s*_?\s*(\d)\s*##',
                         lambda m: f'##ГЛАВА_{m.group(1)}##',
                         raw
                     )
+                    # Bir taraply marker: ##ВВЕДЕНИЕ (## ýok soňunda)
+                    raw = re.sub(
+                        r'##([А-ЯЁA-Z_\d]+)(?!#)',
+                        r'##\1##',
+                        raw
+                    )
 
-                    # Eger hiç marker tapylmasa — düýbünden nädogry format
                     if '##ВВЕДЕНИЕ##' not in raw and '##ГЛАВА_1##' not in raw:
-                        log.warning(
-                            f"⚠️ Attempt {attempt}: Marker tapylmady! "
-                            f"Raw başy: {raw[:300]}"
-                        )
+                        log.warning(f"⚠️ Attempt {attempt}: Marker tapylmady! Raw başy: {raw[:300]}")
                         if attempt < max_retries:
                             wait = attempt * 8
                             log.info(f"Täzeden synanyşylýar {wait}s soň...")
                             await asyncio.sleep(wait)
                             continue
                         else:
-                            # Soňky synanyşykda — raw-y şeýle hem gaýtar,
-                            # parse_ai özi düşünmäge çalşar
                             log.error("❌ Ähli synanyşyk gutardy, raw gaýtarylýar")
                             result["text"] = raw
                             return
 
                     result["text"] = raw
-                    log.info(
-                        f"✅ Attempt {attempt}: Marker tapyldy, "
-                        f"jogap {len(raw)} simwol"
-                    )
+                    log.info(f"✅ Attempt {attempt}: Marker tapyldy, jogap {len(raw)} simwol")
                     return
 
-            except (httpx.ConnectError, httpx.ConnectTimeout,
-                    httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
-                last_exc = e
-                wait = min(attempt * 10, 60)
-                log.warning(
-                    f"Bağlantı {attempt}/{max_retries}: "
-                    f"{type(e).__name__} — {wait}s garaşylýar"
-                )
-                await asyncio.sleep(wait)
-
-            except RuntimeError as e:
-                error["exc"] = e
-                done["flag"] = True
-                return
-
-            except Exception as e:
-                last_exc = e
-                wait = min(attempt * 10, 60)
-                log.warning(f"Ýalňyşlyk {attempt}/{max_retries}: {e} — {wait}s garaşylýar")
-                await asyncio.sleep(wait)
-
-        error["exc"] = last_exc
-        done["flag"] = True
-        
-async def ticker():
-    stage_idx = 0
-    elapsed   = 0
-
-    while not done["flag"]:
-        await asyncio.sleep(6)
-        elapsed += 6
-
-        if stage_idx < len(STAGES):
-            pct, status = STAGES[stage_idx]
-            stage_idx += 1
-        else:
-            pct    = 97
-            mins   = elapsed // 60
-            secs_e = elapsed % 60
-            status = f"⏳ Taýarlanýar... {mins}:{secs_e:02d}"
-
-        try:
-            await on_progress(pct, status)
-        except Exception:
-            pass
-
-    async def fetch():
-        max_retries = 5
-        last_exc    = None
-        for attempt in range(1, max_retries + 1):
-            try:
-                async with httpx.AsyncClient(
-                    timeout=httpx.Timeout(connect=60.0, read=600.0, write=60.0, pool=30.0),
-                    limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
-                    http2=False,
-                ) as cl:
-                    r = await cl.post(DEEPSEEK_URL, headers=headers, json=body)
-                    if r.status_code != 200:
-                        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
-                    resp = r.json()
-                    text = resp["choices"][0]["message"]["content"]
-                    if not text or not text.strip():
-                        raise RuntimeError("DeepSeek boş jogap iberdi")
-                    result["text"] = text.strip()
-                    return
             except (httpx.ConnectError, httpx.ConnectTimeout,
                     httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
                 last_exc = e
                 wait = min(attempt * 10, 60)
                 log.warning(f"Bağlantı {attempt}/{max_retries}: {type(e).__name__} — {wait}s garaşylýar")
                 await asyncio.sleep(wait)
+
             except RuntimeError as e:
                 error["exc"] = e
                 done["flag"] = True
                 return
+
             except Exception as e:
                 last_exc = e
                 wait = min(attempt * 10, 60)
                 log.warning(f"Ýalňyşlyk {attempt}/{max_retries}: {e} — {wait}s garaşylýar")
                 await asyncio.sleep(wait)
+
         error["exc"] = last_exc
         done["flag"] = True
 
     async def ticker():
         stage_idx = 0
         elapsed   = 0
+
         while not done["flag"]:
             await asyncio.sleep(6)
             elapsed += 6
+
             if stage_idx < len(STAGES):
                 pct, status = STAGES[stage_idx]
                 stage_idx += 1
@@ -931,6 +840,7 @@ async def ticker():
                 mins   = elapsed // 60
                 secs_e = elapsed % 60
                 status = f"⏳ Taýarlanýar... {mins}:{secs_e:02d}"
+
             try:
                 await on_progress(pct, status)
             except Exception:
@@ -939,6 +849,7 @@ async def ticker():
     done["flag"] = False
     ft = asyncio.create_task(fetch())
     tt = asyncio.create_task(ticker())
+
     try:
         await ft
     finally:
@@ -948,22 +859,25 @@ async def ticker():
             await tt
         except asyncio.CancelledError:
             pass
+
     if "exc" in error:
         raise error["exc"]
+
+    if not result.get("text"):
+        raise RuntimeError("DeepSeek jogap bermedi. Täzeden /start basyň.")
+
     await on_progress(100, "✅ Taýar!")
     return result["text"]
-
 
 def parse_ai(raw: str, secs: int) -> dict:
     import re as _re
 
-    # Islendik marker formatyny standartlaşdyr
-    # Mysal: ## ВВЕДЕНИЕ ## → ##ВВЕДЕНИЕ##
-    # **##ВВЕДЕНИЕ##** → ##ВВЕДЕНИЕ##
-    raw = _re.sub(r'\*+', '', raw)  # ** aýyr
+    if not raw:
+        log.error("parse_ai: raw=None ýa boş, boş dict gaýtarylýar")
+        return dict(intro=[], chapters=[], conclusion=[], sources=[])
+
+    raw = _re.sub(r'\*+', '', raw)
     raw = _re.sub(r'##\s*([А-ЯЁA-Z_\d]+)\s*##', r'##\1##', raw)
-    
-    # Глава_1, Глава 1, глава_1 hemmesini ##ГЛАВА_1## edip düzelt
     raw = _re.sub(
         r'##\s*[Гг][Лл][Аа][Вв][Аа]\s*_?\s*(\d)\s*##',
         lambda m: f'##ГЛАВА_{m.group(1)}##',
@@ -984,14 +898,12 @@ def parse_ai(raw: str, secs: int) -> dict:
                 best = p
         return text[s:best].strip()
 
-    # Giriş
     intro_raw = _between(raw, "##ВВЕДЕНИЕ##",
                          "##ГЛАВА_1##", "##ЗАКЛЮЧЕНИЕ##", "##СПИСОК_ЛИТЕРАТУРЫ##")
     if not intro_raw:
         m = _re.search(r'##[А-ЯЁ_\d]+##', raw)
         intro_raw = raw[:m.start()].strip() if m else ""
 
-    # Bölümler
     chapters = []
     for i in range(1, secs + 1):
         nxt = f"##ГЛАВА_{i+1}##" if i < secs else "##ЗАКЛЮЧЕНИЕ##"
@@ -1013,14 +925,12 @@ def parse_ai(raw: str, secs: int) -> dict:
             body = lines
         chapters.append({"title": title, "lines": body})
 
-    # Netije
     conc_raw = _between(raw, "##ЗАКЛЮЧЕНИЕ##", "##СПИСОК_ЛИТЕРАТУРЫ##")
     if not conc_raw:
         m3 = _re.search(
             r'##ЗАКЛЮЧЕНИЕ##(.*?)(?=##СПИСОК|$)', raw, _re.DOTALL | _re.IGNORECASE)
         conc_raw = m3.group(1).strip() if m3 else ""
 
-    # Çeşmeler
     src_raw = _between(raw, "##СПИСОК_ЛИТЕРАТУРЫ##")
     if not src_raw:
         m4 = _re.search(
